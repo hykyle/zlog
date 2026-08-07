@@ -15,8 +15,18 @@ defer zlog.Sync()
 zlog.InitLog(zlog.LogPath("./log/newlog.log"), zlog.WithSync())
 ```
 
+
 ### 异步日志
+
+通过gid映射只能保证协程内日志有序
 
 ```Go
 zlog.InitLog(zlog.LogPath("./log/newlog.log"))
+```
+
+
+若要所有协程都要按照打印日志顺序，则不能使用多分片模式，则
+
+```Go
+zlog.InitLog(zlog.LogPath("./log/newlog.log",zlog.ShardSize(1))
 ```
