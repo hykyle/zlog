@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.1.1](https://github.com/hykyle/zlog/compare/v1.1.0...v1.1.1) (2026-08-10)
+
+
+### Features
+
+* 提升退避策略，满队列时丢弃策略 ([d6bb8fc](https://github.com/hykyle/zlog/commit/d6bb8fcec85f37a04adae9da53139aa0670f509f))
+
 ## [1.1.0](https://github.com/hykyle/zlog/compare/v1.0.2...v1.1.0) (2026-08-07)
 
 ### [1.0.2](https://github.com/hykyle/zlog/compare/v1.0.1...v1.0.2) (2026-08-07)
