@@ -52,7 +52,7 @@ func newAsyncLogger(opt *Options) (*zap.Logger, error) {
 		Size:          defaultOptions.bufioSize,
 		FlushInterval: 100 * time.Millisecond,
 	}
-	asyncWS := newAsyncWriteSyncer(ws, opt.shardSize, opt.ringSize, opt.batchSize, opt.dropNewest)
+	asyncWS := newAsyncWriteSyncer(ws, opt.shardSize, opt.ringSize, opt.batchSize, opt.dropType)
 
 	// encoder 配置
 	encoderCfg := zapcore.EncoderConfig{
@@ -67,10 +67,7 @@ func newAsyncLogger(opt *Options) (*zap.Logger, error) {
 		EncodeDuration: zapcore.StringDurationEncoder,
 		EncodeCaller:   callerEncoder,
 		EncodeName:     zapcore.FullNameEncoder,
-		// EncodeTime: func(t time.Time, enc zapcore.PrimitiveArrayEncoder) {
-		// 	enc.AppendString(t.Format("2006-01-02T15:04:05.000"))
-		// },
-		EncodeTime: encodeTimeMs,
+		EncodeTime:     encodeTimeMs,
 	}
 	encoder := zapcore.NewJSONEncoder(encoderCfg)
 
@@ -122,8 +119,10 @@ type AsyncWriteSyncer struct {
 	shardedRing *ShardedRing[[]byte]
 	stop        chan struct{}
 	wg          sync.WaitGroup
-	dropNewest  bool
-	batchSize   uint64
+	dropType    int
+	shardSize   uint64 // 分片数量
+	ringSize    uint64 // 队列容量
+	batchSize   uint64 // 批量大小
 	metrics     Metrics
 	closed      atomic.Bool // 关闭标记，拦截写入
 }
@@ -134,12 +133,14 @@ type AsyncWriteSyncer struct {
 // ringSize: 每个ringbuffer的容量
 // batchSize: 每次读ringbuffer的批量
 // policy: 队列满丢弃/阻塞策略
-func newAsyncWriteSyncer(ws zapcore.WriteSyncer, shardSize, ringSize, batchSize uint64, dropNewest bool) *AsyncWriteSyncer {
+func newAsyncWriteSyncer(ws zapcore.WriteSyncer, shardSize, ringSize, batchSize uint64, dropType int) *AsyncWriteSyncer {
 	a := &AsyncWriteSyncer{
 		ws:          ws,
 		shardedRing: NewShardedRing[[]byte](shardSize, ringSize),
 		stop:        make(chan struct{}),
-		dropNewest:  dropNewest,
+		dropType:    dropType,
+		shardSize:   shardSize,
+		ringSize:    ringSize,
 		batchSize:   batchSize,
 	}
 	a.wg.Go(a.run)
@@ -147,41 +148,49 @@ func newAsyncWriteSyncer(ws zapcore.WriteSyncer, shardSize, ringSize, batchSize 
 }
 
 // backoff 阻塞写入时退避策略，降低CPU空转
-func backoff(spin int) {
+func backoff(spin uint) {
 	switch {
-	case spin < 32:
+	case spin < 8:
+		// 纯忙自旋，什么都不做
+	case spin < 16:
+		// 让出P，G加到runq尾部
 		runtime.Gosched()
-	case spin < 256:
-		time.Sleep(time.Duration(spin-31) * time.Microsecond)
 	default:
-		time.Sleep(500 * time.Microsecond)
+		// 定时挂起
+		us := 1 << (spin - 16)
+		us = min(us, 500)
+		time.Sleep(time.Duration(us) * time.Microsecond)
 	}
 }
 
 // Write 实现 zapcore.WriteSyncer 接口，同步入队，异步落地
 func (a *AsyncWriteSyncer) Write(p []byte) (int, error) {
-	// 已关闭直接丢弃
 	if a.closed.Load() {
-		a.metrics.Dropped.Add(1)
+		// 已关闭，直接丢弃
 		return len(p), nil
 	}
 
+	// 拷贝zap pool缓存
 	buf := make([]byte, 0, len(p))
 	buf = append(buf, p...)
-	if a.dropNewest {
-		if !a.shardedRing.Publish(buf) {
-			a.metrics.Dropped.Add(1)
-			return len(p), nil
-		}
-	} else {
-		for spin := 0; !a.shardedRing.Publish(buf); spin++ {
-			if a.closed.Load() {
-				// 关闭时停止阻塞，释放buffer
-				a.metrics.Dropped.Add(1)
-				return len(p), nil
+	if !a.shardedRing.PublishG(buf) {
+		switch a.dropType {
+		case 0:
+			// 退避等待写日志
+			for spin := uint(0); !a.shardedRing.PublishG(buf); spin++ {
+				if a.closed.Load() {
+					return len(p), nil
+				}
+				backoff(spin)
 			}
-
-			backoff(spin)
+		case 1:
+			// 删除当前G的一半旧日志
+			n := a.shardedRing.BatchDropG(a.ringSize / 2)
+			a.metrics.Dropped.Add(uint64(n))
+			a.shardedRing.PublishG(buf)
+		case 2:
+			// 直接丢弃新日志
+			a.metrics.Dropped.Add(1)
 		}
 	}
 	return len(p), nil
@@ -189,7 +198,7 @@ func (a *AsyncWriteSyncer) Write(p []byte) (int, error) {
 
 // run 后台消费协程主循环，批量写盘+定时刷盘
 func (a *AsyncWriteSyncer) run() {
-	spin := 0
+	spin := uint(0)
 	lbs := make([][]byte, 0, a.batchSize)
 	for {
 		lbs = lbs[:0]

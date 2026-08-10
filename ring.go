@@ -130,6 +130,31 @@ func (r *MPSCRing[T]) BatchRead(max uint64, dst []T) []T {
 	return dst
 }
 
+// BatchDrop 批量删除元素
+func (r *MPSCRing[T]) BatchDrop(max uint64) int {
+	tailStart := r.tail.v.Load()
+	currentTail := tailStart
+
+	droped := 0
+	for idx := range int(max) {
+		pos := currentTail
+		slot := &r.buffer[pos&r.mask]
+		if slot.seq.Load() != pos+1 {
+			droped = idx
+			break
+		}
+
+		slot.seq.Store(pos + r.size)
+		currentTail++
+	}
+
+	if currentTail != tailStart {
+		r.tail.v.Store(currentTail)
+	}
+
+	return droped
+}
+
 // ShardedRing 多分片RingBuffer
 type ShardedRing[T any] struct {
 	shards         []*MPSCRing[T]
@@ -168,21 +193,25 @@ func (r *ShardedRing[T]) Cap() uint64 {
 		r.shards[0].Cap()
 }
 
-// Publish RoundRobin shard select.
-func (r *ShardedRing[T]) Publish(v T) bool {
+// PublishG 向当前G的shard写一条记录
+func (r *ShardedRing[T]) PublishG(v T) bool {
 	idx := uint64(goid.Get()) & r.mask
 	return r.shards[idx].TryPublish(v)
 }
 
-// Read Single Consumer Only
-func (r *ShardedRing[T]) Read() (T, bool) {
-	idx := r.consumerCursor & r.mask
-	r.consumerCursor++
-
+// ReadG 从当前G的shard读取一条记录
+func (r *ShardedRing[T]) ReadG() (T, bool) {
+	idx := uint64(goid.Get()) & r.mask
 	return r.shards[idx].TryRead()
 }
 
-// BatchRead Single Consumer Only 从一个shard最多读取max条记录
+// BatchDropG 从当前G的shard最多删除max条记录
+func (r *ShardedRing[T]) BatchDropG(max uint64) int {
+	idx := uint64(goid.Get()) & r.mask
+	return r.shards[idx].BatchDrop(max)
+}
+
+// BatchRead 从一个shard最多读取max条记录
 func (r *ShardedRing[T]) BatchRead(max uint64, dst []T) []T {
 	idx := r.consumerCursor & r.mask
 	r.consumerCursor++

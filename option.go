@@ -13,29 +13,29 @@ import (
 
 // Options 属性
 type Options struct {
-	level      zapcore.Level  // 测试环境日志级别为debug
-	logPath    string         // 日志路径
-	async      bool           // 异步日志
-	withGID    bool           // 打印协程id
-	stdout     bool           // 日志同时打印到标准输出
-	dropNewest bool           // 日志缓存满则丢弃新日志
-	shardSize  uint64         // ring buffer的分片数量
-	ringSize   uint64         // 每个ring buffer的容量
-	batchSize  uint64         // 每次读ring buffer的批量
-	bufioSize  int            // 写文件bufio的缓存大小
-	fields     map[string]any // 日志默认附加的字段
+	level     zapcore.Level  // 测试环境日志级别为debug
+	logPath   string         // 日志路径
+	async     bool           // 异步日志
+	withGID   bool           // 打印协程id
+	stdout    bool           // 日志同时打印到标准输出
+	dropType  int            // 日志缓存满则丢弃新日志
+	shardSize uint64         // ring buffer的分片数量
+	ringSize  uint64         // 每个ring buffer的容量
+	batchSize uint64         // 每次读ring buffer的批量
+	bufioSize int            // 写文件bufio的缓存大小
+	fields    map[string]any // 日志默认附加的字段
 }
 
 var defaultOptions = Options{
-	level:      zap.DebugLevel,
-	withGID:    false,
-	stdout:     false,
-	dropNewest: false, // 默认满时等待日志
-	async:      true,  // 默认启用异步日志
-	shardSize:  0,     // 默认用go的核心数
-	batchSize:  256,
-	ringSize:   1024 * 16,
-	bufioSize:  1024 * 64,
+	level:     zap.DebugLevel,
+	withGID:   false,
+	stdout:    false,
+	dropType:  0,    // 默认满时等待日志
+	async:     true, // 默认启用异步日志
+	shardSize: 0,    // 默认用go的核心数
+	batchSize: 256,
+	ringSize:  1024 * 16,
+	bufioSize: 1024 * 64,
 }
 
 func getLogFilePath(opt *Options) string {
@@ -55,10 +55,24 @@ func processName() string {
 // Option 属性选项设置函数
 type Option func(*Options)
 
-// DropNewest 设置日志缓存满则丢弃新日志
+// DropNone 不丢弃任何日志，等待
+func DropNone() Option {
+	return func(o *Options) {
+		o.dropType = 0
+	}
+}
+
+// DropOldest 日志缓存满则丢弃旧日志
+func DropOldest() Option {
+	return func(o *Options) {
+		o.dropType = 1
+	}
+}
+
+// DropNewest 日志缓存满则丢弃新日志
 func DropNewest() Option {
 	return func(o *Options) {
-		o.dropNewest = true
+		o.dropType = 2
 	}
 }
 
