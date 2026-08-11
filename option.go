@@ -30,9 +30,9 @@ var defaultOptions = Options{
 	level:     zap.DebugLevel,
 	withGID:   false,
 	stdout:    false,
-	dropType:  0,    // 默认满时等待日志
-	async:     true, // 默认启用异步日志
-	shardSize: 0,    // 默认用go的核心数
+	dropType:  DropNewest, // 默认满时丢弃新日志
+	async:     true,       // 默认启用异步日志
+	shardSize: 0,          // 默认用go的核心数
 	batchSize: 256,
 	ringSize:  1024 * 16,
 	bufioSize: 1024 * 64,
@@ -52,109 +52,123 @@ func processName() string {
 	return name
 }
 
+// DropType 日志溢出的丢弃策略
+type DropType = int
+
+const (
+	// DropNone 不丢弃日志
+	DropNone DropType = 0
+
+	// DropOldest 丢弃旧日志
+	DropOldest DropType = 1
+
+	// DropNewest 丢弃新日志
+	DropNewest DropType = 2
+)
+
 // Option 属性选项设置函数
 type Option func(*Options)
 
-// DropNone 不丢弃任何日志，等待
-func DropNone() Option {
+// OptDropNone 不丢弃任何日志，等待
+func OptDropNone() Option {
 	return func(o *Options) {
-		o.dropType = 0
+		o.dropType = DropNone
 	}
 }
 
-// DropOldest 日志缓存满则丢弃旧日志
-func DropOldest() Option {
+// OptDropOldest 日志缓存满则丢弃旧日志
+func OptDropOldest() Option {
 	return func(o *Options) {
-		o.dropType = 1
+		o.dropType = DropOldest
 	}
 }
 
-// DropNewest 日志缓存满则丢弃新日志
-func DropNewest() Option {
+// OptDropNewest 日志缓存满则丢弃新日志
+func OptDropNewest() Option {
 	return func(o *Options) {
-		o.dropType = 2
+		o.dropType = DropNewest
 	}
 }
 
-// WithGID 打印协程ID(默认不打印)
-func WithGID() Option {
+// OptWithGID 打印协程ID(默认不打印)
+func OptWithGID() Option {
 	return func(o *Options) {
 		o.withGID = true
 	}
 }
 
-// WithSync 使用同步日志，比异步慢近十倍
-func WithSync() Option {
+// OptSync 使用同步日志，比异步慢近十倍
+func OptSync() Option {
 	return func(o *Options) {
 		o.async = false
 	}
 }
 
-// BufioSize bufio缓存的大小, 默认1024*8
-func BufioSize(bufioSize int) Option {
+// OptBufioSize bufio缓存的大小, 默认1024*8
+func OptBufioSize(bufioSize int) Option {
 	return func(o *Options) {
 		o.bufioSize = bufioSize
 	}
 }
 
-// RingSize 每个ring buffer的大小, 默认1024*16
-func RingSize(ringSize int) Option {
+// OptRingSize 每个ring buffer的大小, 默认1024*16
+func OptRingSize(ringSize int) Option {
 	return func(o *Options) {
 		o.ringSize = uint64(ringSize)
 	}
 }
 
-// ShardSize ring buffer的分片数、默认go的核数
-func ShardSize(shardSize int) Option {
+// OptShardSize ring buffer的分片数、默认go的核数
+func OptShardSize(shardSize int) Option {
 	return func(o *Options) {
 		o.shardSize = uint64(shardSize)
 	}
 }
 
-// LogPath 日志文件路径
-func LogPath(logPath string) Option {
+// OptLogPath 日志文件路径
+func OptLogPath(logPath string) Option {
 	return func(o *Options) {
 		o.logPath = logPath
 	}
 }
 
-// WithFields 所有日志都附带的字段
-func WithFields(fields map[string]interface{}) Option {
+// OptWithFields 所有日志都附带的字段
+func OptWithFields(fields map[string]interface{}) Option {
 	return func(o *Options) {
 		o.fields = fields
 	}
 }
 
-// Stdout 日志打印到标准输出(默认不输出到stdout)
-func Stdout() Option {
+// OptStdout 日志打印到标准输出(默认不输出到stdout)
+func OptStdout() Option {
 	return func(o *Options) {
 		o.stdout = true
 	}
 }
 
-// DebugLevel debug日志等级
-func DebugLevel() Option {
+// OptDebugLevel debug日志等级
+func OptDebugLevel() Option {
 	return func(o *Options) {
 		o.level = zap.DebugLevel
 	}
 }
 
-// InfoLevel info日志等级
-func InfoLevel() Option {
+// OptInfoLevel info日志等级
+func OptInfoLevel() Option {
 	return func(o *Options) {
 		o.level = zap.InfoLevel
 	}
 }
 
-// WarnLevel warn日志等级
-func WarnLevel() Option {
+// OptWarnLevel warn日志等级
+func OptWarnLevel() Option {
 	return func(o *Options) {
 		o.level = zap.WarnLevel
 	}
 }
 
-// LogLevel 设置日志等级 debug info warn
-func LogLevel(lv string) Option {
+// OptLogLevel 设置日志等级 debug info warn
+func OptLogLevel(lv string) Option {
 	return func(o *Options) {
 		lv = strings.ToLower(lv)
 		switch lv {

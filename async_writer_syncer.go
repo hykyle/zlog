@@ -108,22 +108,16 @@ func newAsyncLogger(opt *Options) (*zap.Logger, error) {
 // AsyncWriteSyncer 异步日志写入器，实现 zapcore.WriteSyncer
 // =====================================================
 
-// Metrics 异步写入器监控指标，并发安全
-type Metrics struct {
-	Dropped atomic.Uint64 // 队列满丢弃日志条数
-}
-
 // AsyncWriteSyncer 异步缓冲写入，MPSC分片队列+后台批量刷盘
 type AsyncWriteSyncer struct {
 	ws          zapcore.WriteSyncer
 	shardedRing *ShardedRing[[]byte]
 	stop        chan struct{}
 	wg          sync.WaitGroup
-	dropType    int
-	shardSize   uint64 // 分片数量
-	ringSize    uint64 // 队列容量
-	batchSize   uint64 // 批量大小
-	metrics     Metrics
+	dropType    DropType
+	shardSize   uint64      // 分片数量
+	ringSize    uint64      // 队列容量
+	batchSize   uint64      // 批量大小
 	closed      atomic.Bool // 关闭标记，拦截写入
 }
 
@@ -133,7 +127,7 @@ type AsyncWriteSyncer struct {
 // ringSize: 每个ringbuffer的容量
 // batchSize: 每次读ringbuffer的批量
 // policy: 队列满丢弃/阻塞策略
-func newAsyncWriteSyncer(ws zapcore.WriteSyncer, shardSize, ringSize, batchSize uint64, dropType int) *AsyncWriteSyncer {
+func newAsyncWriteSyncer(ws zapcore.WriteSyncer, shardSize, ringSize, batchSize uint64, dropType DropType) *AsyncWriteSyncer {
 	a := &AsyncWriteSyncer{
 		ws:          ws,
 		shardedRing: NewShardedRing[[]byte](shardSize, ringSize),
@@ -158,7 +152,7 @@ func backoff(spin uint) {
 	default:
 		// 定时挂起
 		us := 1 << (spin - 16)
-		us = min(us, 500)
+		us = min(us, 1000) //延长时间，降低空载CPU
 		time.Sleep(time.Duration(us) * time.Microsecond)
 	}
 }
@@ -175,7 +169,7 @@ func (a *AsyncWriteSyncer) Write(p []byte) (int, error) {
 	buf = append(buf, p...)
 	if !a.shardedRing.PublishG(buf) {
 		switch a.dropType {
-		case 0:
+		case DropNone:
 			// 退避等待写日志
 			for spin := uint(0); !a.shardedRing.PublishG(buf); spin++ {
 				if a.closed.Load() {
@@ -183,14 +177,12 @@ func (a *AsyncWriteSyncer) Write(p []byte) (int, error) {
 				}
 				backoff(spin)
 			}
-		case 1:
+		case DropOldest:
 			// 删除当前G的一半旧日志
-			n := a.shardedRing.BatchDropG(a.ringSize / 2)
-			a.metrics.Dropped.Add(uint64(n))
+			a.shardedRing.BatchDropG(a.ringSize / 2)
 			a.shardedRing.PublishG(buf)
-		case 2:
+		case DropNewest:
 			// 直接丢弃新日志
-			a.metrics.Dropped.Add(1)
 		}
 	}
 	return len(p), nil

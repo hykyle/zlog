@@ -12,21 +12,19 @@ defer zlog.Sync()
 ### 同步日志
 
 ```Go
-zlog.InitLog(zlog.LogPath("./log/newlog.log"), zlog.WithSync())
+zlog.InitLog(zlog.OptLogPath("./log/newlog.log"), zlog.OptSync())
 ```
-
 
 ### 异步日志
 
-通过gid映射只能保证协程内日志有序
+通过gid映射切片只能保证协程内日志有序
 
 ```Go
-zlog.InitLog(zlog.LogPath("./log/newlog.log"))
+zlog.InitLog(zlog.OptLogPath("./log/newlog.log"))
 ```
-
 
 若要所有协程都要按照打印日志顺序，则不能使用多分片模式，则
 
 ```Go
-zlog.InitLog(zlog.LogPath("./log/newlog.log",zlog.ShardSize(1))
+zlog.InitLog(zlog.OptLogPath("./log/newlog.log",zlog.OptShardSize(1))
 ```
