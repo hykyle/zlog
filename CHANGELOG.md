@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [1.1.3](https://github.com/hykyle/zlog/compare/v1.1.2...v1.1.3) (2026-08-11)
+
+
+### Bug Fixes
+
+* mPSC队列并发删数据问题 ([26c8f0e](https://github.com/hykyle/zlog/commit/26c8f0e58e6917238904c43ee0e6af544cc27d2a))
+
 ### [1.1.2](https://github.com/hykyle/zlog/compare/v1.1.1...v1.1.2) (2026-08-11)
 
 ### [1.1.1](https://github.com/hykyle/zlog/compare/v1.1.0...v1.1.1) (2026-08-10)
