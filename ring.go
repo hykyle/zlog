@@ -62,7 +62,7 @@ func (r *MPSCRing[T]) Cap() uint64 {
 	return r.size
 }
 
-// TryPublish return false if full
+// TryPublish 尝试插入数据，支持并发调用
 func (r *MPSCRing[T]) TryPublish(v T) bool {
 	var spinCnt uint32
 	for {
@@ -91,7 +91,7 @@ func (r *MPSCRing[T]) TryPublish(v T) bool {
 	}
 }
 
-// TryRead Single Consumer Only
+// TryRead 尝试读取数据，不能并发调用
 func (r *MPSCRing[T]) TryRead() (T, bool) {
 	var zero T
 	pos := r.tail.v.Load()
@@ -106,7 +106,7 @@ func (r *MPSCRing[T]) TryRead() (T, bool) {
 	return v, true
 }
 
-// BatchRead Single Consumer Only
+// BatchRead 批量读取数据，不能并发调用
 func (r *MPSCRing[T]) BatchRead(max uint64, dst []T) []T {
 	tailStart := r.tail.v.Load()
 	currentTail := tailStart
@@ -130,7 +130,7 @@ func (r *MPSCRing[T]) BatchRead(max uint64, dst []T) []T {
 	return dst
 }
 
-// BatchDrop 批量删除元素
+// BatchDrop 批量删除元素，不能并发调用
 func (r *MPSCRing[T]) BatchDrop(max uint64) int {
 	tailStart := r.tail.v.Load()
 	currentTail := tailStart
@@ -193,25 +193,25 @@ func (r *ShardedRing[T]) Cap() uint64 {
 		r.shards[0].Cap()
 }
 
-// PublishG 向当前G的shard写一条记录
+// PublishG 向当前G的shard写一条记录，支持并发调用
 func (r *ShardedRing[T]) PublishG(v T) bool {
 	idx := uint64(goid.Get()) & r.mask
 	return r.shards[idx].TryPublish(v)
 }
 
-// ReadG 从当前G的shard读取一条记录
+// ReadG 从当前G的shard读取一条记录，不能并发调用
 func (r *ShardedRing[T]) ReadG() (T, bool) {
 	idx := uint64(goid.Get()) & r.mask
 	return r.shards[idx].TryRead()
 }
 
-// BatchDropG 从当前G的shard最多删除max条记录
+// BatchDropG 从当前G的shard最多删除max条记录，不能并发调用
 func (r *ShardedRing[T]) BatchDropG(max uint64) int {
 	idx := uint64(goid.Get()) & r.mask
 	return r.shards[idx].BatchDrop(max)
 }
 
-// BatchRead 从一个shard最多读取max条记录
+// BatchRead 从一个shard最多读取max条记录，不能并发调用
 func (r *ShardedRing[T]) BatchRead(max uint64, dst []T) []T {
 	idx := r.consumerCursor & r.mask
 	r.consumerCursor++

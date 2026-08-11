@@ -177,10 +177,6 @@ func (a *AsyncWriteSyncer) Write(p []byte) (int, error) {
 				}
 				backoff(spin)
 			}
-		case DropOldest:
-			// 删除当前G的一半旧日志
-			a.shardedRing.BatchDropG(a.ringSize / 2)
-			a.shardedRing.PublishG(buf)
 		case DropNewest:
 			// 直接丢弃新日志
 		}

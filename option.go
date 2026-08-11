@@ -59,11 +59,10 @@ const (
 	// DropNone 不丢弃日志
 	DropNone DropType = 0
 
-	// DropOldest 丢弃旧日志
-	DropOldest DropType = 1
-
 	// DropNewest 丢弃新日志
-	DropNewest DropType = 2
+	DropNewest DropType = 1
+
+	// MPSC队列不支持并发删除旧日志
 )
 
 // Option 属性选项设置函数
@@ -73,13 +72,6 @@ type Option func(*Options)
 func OptDropNone() Option {
 	return func(o *Options) {
 		o.dropType = DropNone
-	}
-}
-
-// OptDropOldest 日志缓存满则丢弃旧日志
-func OptDropOldest() Option {
-	return func(o *Options) {
-		o.dropType = DropOldest
 	}
 }
 
