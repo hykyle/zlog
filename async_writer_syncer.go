@@ -115,10 +115,12 @@ type AsyncWriteSyncer struct {
 	stop        chan struct{}
 	wg          sync.WaitGroup
 	dropType    DropType
-	shardSize   uint64      // 分片数量
-	ringSize    uint64      // 队列容量
-	batchSize   uint64      // 批量大小
-	closed      atomic.Bool // 关闭标记，拦截写入
+	shardSize   uint64        // 分片数量
+	ringSize    uint64        // 队列容量
+	batchSize   uint64        // 批量大小
+	closed      atomic.Bool   // 关闭标记，拦截写入
+	needWake    atomic.Bool   // 需要唤醒消费协程
+	notifyCh    chan struct{} // 唤醒消费协程管道
 }
 
 // NewAsyncWriteSyncer 创建异步写入器
@@ -132,6 +134,7 @@ func newAsyncWriteSyncer(ws zapcore.WriteSyncer, shardSize, ringSize, batchSize 
 		ws:          ws,
 		shardedRing: NewShardedRing[[]byte](shardSize, ringSize),
 		stop:        make(chan struct{}),
+		notifyCh:    make(chan struct{}, 1),
 		dropType:    dropType,
 		shardSize:   shardSize,
 		ringSize:    ringSize,
@@ -181,12 +184,23 @@ func (a *AsyncWriteSyncer) Write(p []byte) (int, error) {
 			// 直接丢弃新日志
 		}
 	}
+
+	// 原子标记，绝大多数协程到此结束
+	if a.needWake.CompareAndSwap(false, true) {
+		select {
+		case a.notifyCh <- struct{}{}:
+		default:
+		}
+	}
+
 	return len(p), nil
 }
 
 // run 后台消费协程主循环，批量写盘+定时刷盘
 func (a *AsyncWriteSyncer) run() {
 	spin := uint(0)
+	emptyCount := uint(0)
+	maxEmptySpin := uint(1024)
 	lbs := make([][]byte, 0, a.batchSize)
 	for {
 		lbs = lbs[:0]
@@ -215,16 +229,32 @@ func (a *AsyncWriteSyncer) run() {
 
 		default:
 			lbs = a.shardedRing.BatchRead(a.batchSize, lbs)
-			if len(lbs) == 0 {
+			if len(lbs) > 0 {
+				for _, item := range lbs {
+					_, _ = a.ws.Write(item)
+				}
+				spin = 0
+				emptyCount = 0
+				continue
+			}
+
+			emptyCount++
+			if emptyCount < maxEmptySpin {
 				backoff(spin)
 				spin++
 				continue
 			}
 
-			for _, item := range lbs {
-				_, _ = a.ws.Write(item)
+			// 确认队列空，重置唤醒标记，进入阻塞等待唤醒
+			a.needWake.Store(false)
+			select {
+			case <-a.stop:
+				continue
+			case <-a.notifyCh:
+				// 被唤醒，重置状态，回去读队列
+				emptyCount = 0
+				spin = 0
 			}
-			spin = 0
 		}
 	}
 }
